@@ -1,0 +1,30 @@
+# LLM Inference
+vllm>=0.6.0
+
+# Async HTTP and Queue
+aio-pika>=9.4.0
+aiohttp>=3.9.0
+aiodns>=3.1.0
+
+# Web Scraping
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# Data Validation and Config
+pydantic>=2.6.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# OpenAI Client (for vLLM)
+openai>=1.12.0
+
+# Graph Visualization and Dashboard
+networkx>=3.0
+plotly>=5.0
+streamlit>=1.30
+pandas>=2.0
+scipy>=1.11
+
+# Utilities
+structlog>=24.1.0
+tenacity>=8.2.0
