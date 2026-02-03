@@ -12,9 +12,9 @@ ENV/
 .env
 
 # Data
-data/
+#data/
 logs/
-*.jsonl
+#*.jsonl
 *.json
 
 # IDE
