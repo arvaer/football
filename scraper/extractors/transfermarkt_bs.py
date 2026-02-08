@@ -380,27 +380,36 @@ def parse_club_transfers(html: str, url: str) -> Dict[str, Any]:
     }
     
     # Find transfer tables
-    # Club transfers page has both arrivals and departures
-    # They're usually in separate boxes with headers
+    # Club transfers page has both arrivals and departures in responsive-table divs
+    # Look for all tables with class='items' inside responsive-table containers
     
-    boxes = soup.find_all('div', class_='box')
+    responsive_tables = soup.find_all('div', class_='responsive-table')
     
-    for box in boxes:
-        # Check if this is a transfer box
-        box_header = box.find(['h2', 'div'], class_=re.compile(r'table-header|box-header'))
-        if not box_header:
+    if not responsive_tables:
+        logger.warning("bs_extraction_no_responsive_table", url=url)
+        return data
+    
+    for responsive_div in responsive_tables:
+        # Find the table
+        table = responsive_div.find('table', class_='items')
+        if not table:
             continue
         
-        header_text = clean_text(box_header.get_text()).lower()
-        is_arrivals = 'arrival' in header_text or 'in' in header_text
-        is_departures = 'departure' in header_text or 'out' in header_text
+        # Determine if this is arrivals or departures from the thead
+        thead = table.find('thead')
+        if not thead:
+            continue
+        
+        # Check headers to determine transfer direction
+        # Arrivals have "Joined" column, Departures have "Left" column
+        headers = thead.find_all('th')
+        header_texts = [clean_text(th.get_text()).lower() if th.get_text() else '' for th in headers]
+        
+        is_arrivals = any('join' in h for h in header_texts)
+        is_departures = any('left' in h for h in header_texts)
         
         if not (is_arrivals or is_departures):
-            continue
-        
-        # Find table in this box
-        table = box.find('table', class_='items')
-        if not table:
+            # Can't determine direction, skip
             continue
         
         # Parse rows
@@ -411,7 +420,7 @@ def parse_club_transfers(html: str, url: str) -> Dict[str, Any]:
         rows = tbody.find_all('tr', recursive=False)
         
         for row in rows:
-            # Skip header rows
+            # Skip header rows or separators
             if row.find('th'):
                 continue
             
@@ -421,59 +430,62 @@ def parse_club_transfers(html: str, url: str) -> Dict[str, Any]:
             
             transfer = {}
             
-            # Extract player
-            player_cell = cells[0] if len(cells) > 0 else None
+            # Typical structure for club transfers:
+            # cells[0]: Position badge
+            # cells[1]: Player info (nested table with name, image, position)
+            # cells[2]: Age
+            # cells[3]: Nationality
+            # cells[4]: Club info (other club + league)
+            # cells[5]: Fee
+            
+            # Extract player from cells[1]
+            player_cell = cells[1] if len(cells) > 1 else None
             if player_cell:
                 player_link = player_cell.find('a', href=re.compile(r'/spieler/'))
                 if player_link:
                     transfer["player_name"] = clean_text(player_link.get_text())
-                    player_id = extract_id_from_url(player_link['href'], 'player')
+                    player_id = extract_id_from_url(player_link.get('href', ''), 'player')
                     if player_id:
                         transfer["player_tm_id"] = player_id
             
-            # Extract other club (from or to depending on direction)
-            # Usually in cells[2] or cells[3]
-            for cell in cells[1:4]:
-                club_link = cell.find('a', href=re.compile(r'/verein/'))
+            # Extract other club from cells[4]
+            club_cell = cells[4] if len(cells) > 4 else None
+            if club_cell:
+                club_link = club_cell.find('a', href=re.compile(r'/verein/'))
                 if club_link:
                     other_club_name = clean_text(club_link.get_text())
-                    other_club_id = extract_id_from_url(club_link['href'], 'club')
+                    other_club_id = extract_id_from_url(club_link.get('href', ''), 'club')
                     
                     if is_arrivals:
+                        # Player joined from other club
                         transfer["from_club"] = other_club_name
                         if other_club_id:
                             transfer["from_club_tm_id"] = other_club_id
                         transfer["to_club"] = club_name
-                        transfer["to_club_tm_id"] = club_id
+                        if club_id:
+                            transfer["to_club_tm_id"] = club_id
                     else:
+                        # Player left to other club
                         transfer["to_club"] = other_club_name
                         if other_club_id:
                             transfer["to_club_tm_id"] = other_club_id
                         transfer["from_club"] = club_name
-                        transfer["from_club_tm_id"] = club_id
-                    break
+                        if club_id:
+                            transfer["from_club_tm_id"] = club_id
             
-            # Extract fee (usually last column)
-            fee_cell = cells[-1] if cells else None
+            # Extract fee from cells[5] (last cell)
+            fee_cell = cells[5] if len(cells) > 5 else cells[-1]
             if fee_cell:
                 fee_text = clean_text(fee_cell.get_text())
-                amount, currency, is_disclosed = parse_money(fee_text)
-                
-                transfer["fee"] = {
-                    "amount": amount,
-                    "currency": currency,
-                    "is_disclosed": is_disclosed,
-                    "notes": fee_text if not is_disclosed or amount is None else None,
-                }
-            
-            # Extract date if present
-            for cell in cells:
-                cell_text = clean_text(cell.get_text())
-                if cell_text and re.match(r'\w{3}\s+\d{1,2},\s+\d{4}', cell_text):
-                    parsed_date = parse_date(cell_text)
-                    if parsed_date:
-                        transfer["transfer_date"] = parsed_date
-                        break
+                if fee_text:
+                    amount, currency, is_disclosed = parse_money(fee_text)
+                    
+                    transfer["fee"] = {
+                        "amount": amount,
+                        "currency": currency,
+                        "is_disclosed": is_disclosed,
+                        "notes": fee_text if not is_disclosed or amount is None else None,
+                    }
             
             # Only add if we have player info
             if "player_name" in transfer or "player_tm_id" in transfer:
