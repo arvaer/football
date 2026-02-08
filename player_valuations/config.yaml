@@ -1,0 +1,48 @@
+# Valuation Pathway Simulator - Configuration
+
+# Dynamics model to use
+model: regime_switching_log
+
+# Regime definitions (mu = monthly log drift, sigma = monthly log volatility)
+regimes:
+  ecuador:
+    mu: 0.008    # ~0.8% monthly drift → ~10% annual
+    sigma: 0.12  # ~12% monthly vol → ~42% annual vol
+  
+  brazil:
+    mu: 0.015    # ~1.5% monthly drift → ~20% annual
+    sigma: 0.10  # ~10% monthly vol → ~35% annual vol
+  
+  europe:
+    mu: 0.020    # ~2% monthly drift → ~27% annual
+    sigma: 0.08  # ~8% monthly vol → ~28% annual vol
+
+# Scenario definitions (compact segment notation)
+scenarios:
+  stay_ecuador_6m:
+    segments:
+      - regime: ecuador
+        months: 6
+  
+  ecuador_2m_then_brazil_4m:
+    segments:
+      - regime: ecuador
+        months: 2
+      - regime: brazil
+        months: 4
+  
+  ecuador_2m_brazil_2m_europe_2m:
+    segments:
+      - regime: ecuador
+        months: 2
+      - regime: brazil
+        months: 2
+      - regime: europe
+        months: 2
+
+# Default simulation parameters (can be overridden via CLI)
+defaults:
+  V0: 2.0      # Initial valuation in millions
+  months: 6    # Simulation horizon
+  N: 1000      # Number of Monte Carlo paths
+  seed: 0      # Random seed for reproducibility
