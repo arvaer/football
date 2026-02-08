@@ -1,4 +1,4 @@
-.PHONY: help install status rabbitmq vllm seed run clean
+.PHONY: help install status rabbitmq vllm seed run clean league-tiers
 
 help:
 	@echo "Transfermarkt Agentic Scraper - Makefile Commands"
@@ -15,6 +15,7 @@ help:
 	@echo "  make seed        - Seed initial tasks only"
 	@echo "  make run         - Run scraper with default settings"
 	@echo "  make run-dev     - Run with fewer workers for testing"
+	@echo "  make league-tiers - Extract league tier data (standalone)"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make clean       - Clean logs and extracted data"
@@ -42,6 +43,10 @@ run:
 
 run-dev:
 	uv run python -m scraper.main --discovery-workers 1 --extraction-workers 2 --repair-workers 1
+
+league-tiers:
+	@echo "Running league tier extraction (standalone)..."
+	uv run python scripts/run_league_tier_extraction.py
 
 clean:
 	@echo "Cleaning logs and data..."

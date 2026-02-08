@@ -20,7 +20,7 @@ echo "GPU memory utilization: $GPU_MEMORY_UTIL"
 echo "Max concurrent sequences: $MAX_NUM_SEQS"
 
 # Start vLLM server
-python -m vllm.entrypoints.openai.api_server \
+uv run python -m vllm.entrypoints.openai.api_server \
     --model "$MODEL_NAME" \
     --host "$HOST" \
     --port "$PORT" \

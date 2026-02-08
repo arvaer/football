@@ -83,7 +83,26 @@ class ScraperSettings(BaseSettings):
     max_retries: int = Field(default=3, alias="MAX_RETRIES")
     max_pages: int = Field(default=10000, alias="MAX_PAGES")
     
+    # BeautifulSoup extraction feature flags
+    use_bs_extractors: bool = Field(default=False, alias="USE_BS_EXTRACTORS")
+    bs_fallback_to_llm: bool = Field(default=True, alias="BS_FALLBACK_TO_LLM")
+    use_bs_extractors_for_raw: str = Field(
+        default="",
+        alias="USE_BS_EXTRACTORS_FOR"
+    )
+    
+    # LLM validation settings
+    enable_llm_validation: bool = Field(default=True, alias="ENABLE_LLM_VALIDATION")
+    llm_validation_blocking: bool = Field(default=False, alias="LLM_VALIDATION_BLOCKING")
+    
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    
+    @property
+    def use_bs_extractors_for(self) -> List[str]:
+        """Parse and return page types that should use BS extractors."""
+        if isinstance(self.use_bs_extractors_for_raw, str):
+            return [pt.strip() for pt in self.use_bs_extractors_for_raw.split(",") if pt.strip()]
+        return []
 
 
 class StorageSettings(BaseSettings):

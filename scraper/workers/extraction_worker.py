@@ -13,11 +13,20 @@ from bs4 import BeautifulSoup
 from scraper.config import settings
 from scraper.models import (
     ScrapingTask, ExtractionResult, PageType,
-    Transfer, Player, Club, Fee, Currency, TransferType, Position
+    Transfer, Player, Club, Fee, Currency, TransferType, Position,
+    ValidationReport
 )
 from scraper.queue import get_queue_manager, publish_repair_task
 from scraper.llm_client import get_llm_client
 from scraper.workers.discovery_worker import DiscoveryAgent
+from scraper.extractors.transfermarkt_bs import (
+    parse_player_profile,
+    parse_player_transfers,
+    parse_club_transfers,
+    parse_club_profile,
+    ExtractionError
+)
+from scraper.validators.transfermarkt_llm_validator import get_validator
 
 logger = structlog.get_logger()
 
@@ -27,6 +36,7 @@ class ExtractionAgent:
     
     def __init__(self):
         self.llm = get_llm_client()
+        self.validator = get_validator()
         self.discovery = DiscoveryAgent()
         # Clear visited URLs from discovery to allow extraction to fetch
         self.discovery.visited.clear()
@@ -171,14 +181,188 @@ class ExtractionAgent:
         # Fallback: return first 20k chars
         print(f"HTML EXTRACTION: Using fallback (first 20k chars) for {page_type}")
         return html[:20000]
+    
+    def is_transfermarkt_url(self, url: str) -> bool:
+        """Check if URL is a Transfermarkt URL."""
+        return 'transfermarkt.com' in url.lower()
+    
+    def should_use_bs_for_page_type(self, page_type: PageType) -> bool:
+        """Check if BS extraction should be used for this page type."""
+        # Check global flag
+        if not settings.scraper.use_bs_extractors:
+            return False
         
-    async def extract_from_page(
+        # Check per-page-type flag
+        allowed_types = settings.scraper.use_bs_extractors_for
+        if allowed_types:
+            page_type_str = page_type.value if isinstance(page_type, PageType) else page_type
+            return page_type_str in allowed_types
+        
+        # If use_bs_extractors is True but no specific types, use for all
+        return True
+    
+    async def extract_from_page_bs(
         self,
         html: str,
         url: str,
         page_type: PageType,
     ) -> ExtractionResult:
-        """Extract structured data from HTML page."""
+        """
+        Extract structured data from HTML using BeautifulSoup (deterministic).
+        
+        Args:
+            html: HTML content
+            url: Page URL
+            page_type: Type of page
+        
+        Returns:
+            ExtractionResult with extraction_backend='bs'
+        """
+        print(f"BS: Extracting {page_type} from {len(html)} chars")
+        logger.info("bs_extracting_data", url=url, page_type=page_type)
+        
+        try:
+            # Route to appropriate BS parser
+            if page_type == PageType.PLAYER_PROFILE:
+                data = parse_player_profile(html, url)
+            elif page_type == PageType.PLAYER_TRANSFERS:
+                data = parse_player_transfers(html, url)
+            elif page_type == PageType.CLUB_TRANSFERS:
+                data = parse_club_transfers(html, url)
+            elif page_type == PageType.CLUB_PROFILE:
+                data = parse_club_profile(html, url)
+            else:
+                raise ExtractionError(f"BS extraction not implemented for {page_type}")
+            
+            print(f"BS: Extracted data keys: {list(data.keys())}")
+            
+            # Create result
+            result = ExtractionResult(
+                success=True,
+                page_type=page_type,
+                url=url,
+                data=data,
+                extraction_backend="bs",
+            )
+            
+            # Convert to typed models based on page type
+            self._populate_typed_models(result, data, url)
+            
+            # Validate with LLM if enabled
+            if settings.scraper.enable_llm_validation:
+                try:
+                    validation_report = await self.validator.validate(
+                        extracted_data=data,
+                        page_type=page_type,
+                        html_snippet=None  # Don't send HTML to LLM
+                    )
+                    result.validation = validation_report.model_dump()
+                    
+                    if validation_report.needs_review:
+                        logger.warning(
+                            "bs_extraction_needs_review",
+                            url=url,
+                            warnings=validation_report.warnings
+                        )
+                except Exception as ve:
+                    logger.error("validation_error", url=url, error=str(ve))
+            
+            logger.info(
+                "bs_extraction_success",
+                url=url,
+                page_type=page_type,
+                players=len(result.players),
+                clubs=len(result.clubs),
+                transfers=len(result.transfers),
+            )
+            
+            return result
+            
+        except ExtractionError as e:
+            logger.error(
+                "bs_extraction_failed",
+                url=url,
+                page_type=page_type,
+                error=str(e),
+            )
+            
+            return ExtractionResult(
+                success=False,
+                page_type=page_type,
+                url=url,
+                error=str(e),
+                extraction_backend="bs",
+            )
+        except Exception as e:
+            logger.error(
+                "bs_extraction_error",
+                url=url,
+                page_type=page_type,
+                error=str(e),
+                exc_info=True,
+            )
+            
+            return ExtractionResult(
+                success=False,
+                page_type=page_type,
+                url=url,
+                error=str(e),
+                extraction_backend="bs",
+            )
+    
+    def _populate_typed_models(self, result: ExtractionResult, data: Dict[str, Any], url: str):
+        """Populate typed Pydantic models from extracted data dict."""
+        page_type = result.page_type
+        
+        if page_type == PageType.PLAYER_PROFILE:
+            if "player" in data:
+                player_data = data["player"]
+                # Remove None values and let Pydantic use defaults
+                player_data = {k: v for k, v in player_data.items() if v is not None}
+                player = Player(**player_data)
+                result.players.append(player)
+                
+        elif page_type == PageType.PLAYER_TRANSFERS:
+            for transfer_data in data.get("transfers", []):
+                # Remove None values
+                transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
+                transfer = Transfer(
+                    player_tm_id=data.get("player_tm_id"),
+                    player_name=data.get("player_name"),
+                    source_url=url,
+                    **transfer_data
+                )
+                result.transfers.append(transfer)
+                
+        elif page_type == PageType.CLUB_TRANSFERS:
+            for transfer_data in data.get("transfers", []):
+                # Remove None values
+                transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
+                try:
+                    transfer = Transfer(
+                        source_url=url,
+                        **transfer_data
+                    )
+                    result.transfers.append(transfer)
+                except Exception as e:
+                    print(f"ERROR: Failed to create Transfer from {transfer_data}: {e}")
+                    continue
+                
+        elif page_type == PageType.CLUB_PROFILE:
+            if "club" in data:
+                club_data = data["club"]
+                # Remove None values and let Pydantic use defaults
+                club_data = {k: v for k, v in club_data.items() if v is not None}
+                club = Club(**club_data)
+                result.clubs.append(club)
+    
+    async def extract_from_page_llm(
+        self,
+        html: str,
+        url: str,
+        page_type: PageType,
+    ) -> ExtractionResult:
+        """Extract structured data from HTML page using LLM."""
         print(f"LLM: Extracting {page_type} from {len(html)} chars")
         logger.info("extracting_data", url=url, page_type=page_type)
         
@@ -219,64 +403,11 @@ class ExtractionAgent:
                 page_type=page_type,
                 url=url,
                 data=data,
+                extraction_backend="llm",
             )
             
-            # Convert to typed models based on page type
-            if page_type == PageType.PLAYER_PROFILE:
-                if "player" in data:
-                    player_data = data["player"]
-                    # Remove None values and let Pydantic use defaults
-                    player_data = {k: v for k, v in player_data.items() if v is not None}
-                    player = Player(**player_data)
-                    result.players.append(player)
-                    
-            elif page_type == PageType.PLAYER_TRANSFERS:
-                for transfer_data in data.get("transfers", []):
-                    # Remove None values
-                    transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
-                    transfer = Transfer(
-                        player_tm_id=data.get("player_tm_id"),
-                        player_name=data.get("player_name"),
-                        source_url=url,
-                        **transfer_data
-                    )
-                    result.transfers.append(transfer)
-                    
-            elif page_type == PageType.CLUB_TRANSFERS:
-                for transfer_data in data.get("transfers", []):
-                    # Fix common LLM extraction errors
-                    if "fee" in transfer_data and transfer_data["fee"]:
-                        fee = transfer_data["fee"]
-                        # Fix: LLM extracting amounts in wrong units (€2.87m as 287000000 instead of 2.87)
-                        if fee.get("amount") and fee["amount"] > 10000:
-                            print(f"WARNING: Suspicious fee amount {fee['amount']} - likely in wrong units, dividing by 1M")
-                            fee["amount"] = fee["amount"] / 1000000
-                        # Set defaults for missing fields
-                        if "currency" not in fee or fee["currency"] is None:
-                            fee["currency"] = "EUR"
-                        if "is_disclosed" not in fee or fee["is_disclosed"] is None:
-                            fee["is_disclosed"] = fee.get("amount") is not None
-                    
-                    # Remove None values
-                    transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
-                    try:
-                        transfer = Transfer(
-                            source_url=url,
-                            **transfer_data
-                        )
-                        result.transfers.append(transfer)
-                    except Exception as e:
-                        print(f"ERROR: Failed to create Transfer from {transfer_data}: {e}")
-                        # Continue with other transfers even if one fails
-                        continue
-                    
-            elif page_type == PageType.CLUB_PROFILE:
-                if "club" in data:
-                    club_data = data["club"]
-                    # Remove None values and let Pydantic use defaults
-                    club_data = {k: v for k, v in club_data.items() if v is not None}
-                    club = Club(**club_data)
-                    result.clubs.append(club)
+            # Convert to typed models based on page type - LLM version with fixes
+            self._convert_llm_data_to_typed_models(result, data, url)
                     
             logger.info(
                 "extraction_success",

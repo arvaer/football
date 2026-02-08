@@ -10,6 +10,8 @@ class PageType(str, Enum):
     """Types of Transfermarkt pages."""
     
     LEAGUE_INDEX = "league_index"
+    LEAGUE_INDEX_BS = "league_index_bs"  # BeautifulSoup deterministic extraction
+    LEAGUE_INDEX_ENRICH = "league_index_enrich"  # LLM enrichment/validation
     LEAGUE_CLUBS = "league_clubs"
     CLUB_PROFILE = "club_profile"
     CLUB_TRANSFERS = "club_transfers"
@@ -171,8 +173,26 @@ class ExtractionResult(BaseModel):
     extraction_time_ms: Optional[float] = None
     extracted_at: datetime = Field(default_factory=datetime.utcnow)
     
+    # Extraction backend tracking
+    extraction_backend: str = Field(default="llm")  # "llm", "bs", or "bs_fallback_llm"
+    
+    # Validation tracking
+    validation: Optional[Dict[str, Any]] = Field(default=None)
+    
     class Config:
         use_enum_values = True
+
+
+class ValidationReport(BaseModel):
+    """LLM validation report for deterministic extraction."""
+    
+    warnings: List[str] = Field(default_factory=list)
+    suggested_fixes: List[Dict[str, Any]] = Field(default_factory=list)
+    fixes_applied: List[str] = Field(default_factory=list)
+    needs_review: bool = False
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    validation_notes: Optional[str] = None
+    validated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class RepairTask(BaseModel):
