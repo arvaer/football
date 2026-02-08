@@ -16,6 +16,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 import httpx
 import structlog
 
@@ -44,10 +45,27 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
-# Source URLs to scrape
+# Source URLs to scrape - country-specific pages have all tier levels
 SOURCE_URLS = [
-    "https://www.transfermarkt.us/wettbewerbe/europa",
-    "https://www.transfermarkt.us/wettbewerbe/amerika",
+    # Major European countries
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/GB", "europa", "England"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/ES", "europa", "Spain"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/IT", "europa", "Italy"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/L1", "europa", "Germany"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/FR", "europa", "France"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/PO", "europa", "Portugal"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/TR", "europa", "Turkey"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/NL", "europa", "Netherlands"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/RU", "europa", "Russia"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/BE", "europa", "Belgium"),
+    
+    # Americas
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/BR", "amerika", "Brazil"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/AR", "amerika", "Argentina"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/MX", "amerika", "Mexico"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/US", "amerika", "United States"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/CO", "amerika", "Colombia"),
+    ("https://www.transfermarkt.us/wettbewerbe/national/wettbewerbe/CL", "amerika", "Chile"),
 ]
 
 # User agent for requests
@@ -96,17 +114,26 @@ async def run_stage_a() -> tuple[Path, list]:
     
     all_rows = []
     
-    for url in SOURCE_URLS:
+    for url_tuple in SOURCE_URLS:
+        url, confederation, country = url_tuple
         try:
             # Fetch HTML
             html = await fetch_html(url)
             
             # Extract competitions
             rows = extract_league_index_rows(html, url)
+            
+            # Override confederation and country from our known list
+            for row in rows:
+                row['confederation'] = confederation
+                if not row.get('country'):
+                    row['country'] = country
+            
             all_rows.extend(rows)
             
             logger.info("extracted_from_url",
                        url=url,
+                       country=country,
                        competitions=len(rows))
             
         except Exception as e:
@@ -146,14 +173,14 @@ async def run_stage_a() -> tuple[Path, list]:
     return output_path, all_rows
 
 
-async def run_stage_b(stage_a_rows: list) -> Path:
+async def run_stage_b(stage_a_rows: list) -> Optional[Path]:
     """Run Stage B: LLM enrichment (stub).
     
     Args:
         stage_a_rows: Rows from Stage A
         
     Returns:
-        Path to Stage B output
+        Path to Stage B output or None if failed
     """
     logger.info("=== STAGE B: LLM Enrichment (STUB) ===")
     
