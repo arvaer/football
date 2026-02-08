@@ -356,6 +356,102 @@ class ExtractionAgent:
                 club = Club(**club_data)
                 result.clubs.append(club)
     
+    def _convert_llm_data_to_typed_models(self, result: ExtractionResult, data: Dict[str, Any], url: str):
+        """Convert LLM-extracted data to typed Pydantic models (with LLM-specific fixes)."""
+        page_type = result.page_type
+        
+        if page_type == PageType.PLAYER_PROFILE:
+            if "player" in data:
+                player_data = data["player"]
+                player_data = {k: v for k, v in player_data.items() if v is not None}
+                player = Player(**player_data)
+                result.players.append(player)
+                
+        elif page_type == PageType.PLAYER_TRANSFERS:
+            for transfer_data in data.get("transfers", []):
+                transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
+                transfer = Transfer(
+                    player_tm_id=data.get("player_tm_id"),
+                    player_name=data.get("player_name"),
+                    source_url=url,
+                    **transfer_data
+                )
+                result.transfers.append(transfer)
+                
+        elif page_type == PageType.CLUB_TRANSFERS:
+            for transfer_data in data.get("transfers", []):
+                # Fix common LLM extraction errors
+                if "fee" in transfer_data and transfer_data["fee"]:
+                    fee = transfer_data["fee"]
+                    # Fix: LLM extracting amounts in wrong units (€2.87m as 287000000 instead of 2.87)
+                    if fee.get("amount") and fee["amount"] > 10000:
+                        print(f"WARNING: Suspicious fee amount {fee['amount']} - likely in wrong units, dividing by 1M")
+                        fee["amount"] = fee["amount"] / 1000000
+                    # Set defaults for missing fields
+                    if "currency" not in fee or fee["currency"] is None:
+                        fee["currency"] = "EUR"
+                    if "is_disclosed" not in fee or fee["is_disclosed"] is None:
+                        fee["is_disclosed"] = fee.get("amount") is not None
+                
+                transfer_data = {k: v for k, v in transfer_data.items() if v is not None}
+                try:
+                    transfer = Transfer(
+                        source_url=url,
+                        **transfer_data
+                    )
+                    result.transfers.append(transfer)
+                except Exception as e:
+                    print(f"ERROR: Failed to create Transfer from {transfer_data}: {e}")
+                    continue
+                    
+        elif page_type == PageType.CLUB_PROFILE:
+            if "club" in data:
+                club_data = data["club"]
+                club_data = {k: v for k, v in club_data.items() if v is not None}
+                club = Club(**club_data)
+                result.clubs.append(club)
+    
+    async def extract_from_page(
+        self,
+        html: str,
+        url: str,
+        page_type: PageType,
+    ) -> ExtractionResult:
+        """
+        Extract structured data from HTML page.
+        
+        Routes to either BS (deterministic) or LLM extraction based on config.
+        
+        Args:
+            html: HTML content
+            url: Page URL
+            page_type: Type of page
+        
+        Returns:
+            ExtractionResult
+        """
+        # Check if we should use BS extraction
+        use_bs = (
+            self.is_transfermarkt_url(url) and
+            self.should_use_bs_for_page_type(page_type)
+        )
+        
+        if use_bs:
+            print(f"ROUTING: Using BS extraction for {page_type}")
+            result = await self.extract_from_page_bs(html, url, page_type)
+            
+            # Fallback to LLM if BS fails and fallback is enabled
+            if not result.success and settings.scraper.bs_fallback_to_llm:
+                print(f"FALLBACK: BS failed, falling back to LLM for {page_type}")
+                logger.warning("bs_fallback_to_llm", url=url, error=result.error)
+                result = await self.extract_from_page_llm(html, url, page_type)
+                result.extraction_backend = "bs_fallback_llm"
+        else:
+            print(f"ROUTING: Using LLM extraction for {page_type}")
+            result = await self.extract_from_page_llm(html, url, page_type)
+        
+        return result
+    
     async def extract_from_page_llm(
         self,
         html: str,
