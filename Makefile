@@ -22,8 +22,8 @@ help:
 	@echo "  make queues      - Show RabbitMQ queue stats"
 
 install:
-	pip install -r requirements.txt
-
+# 	pip install -r requirements.txt
+	uv sync
 status:
 	./scripts/check_status.sh
 
@@ -34,13 +34,14 @@ vllm:
 	./scripts/start_vllm.sh
 
 seed:
-	python -m scraper.main --seed-only
+# 	python -m scraper.main --seed-only
+	uv run python -m scraper.main --seed-only
 
 run:
-	python -m scraper.main
+	uv run python -m scraper.main
 
 run-dev:
-	python -m scraper.main --discovery-workers 1 --extraction-workers 2 --repair-workers 1
+	uv run python -m scraper.main --discovery-workers 1 --extraction-workers 2 --repair-workers 1
 
 clean:
 	@echo "Cleaning logs and data..."

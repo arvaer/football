@@ -43,7 +43,7 @@ read -r
 
 echo ""
 echo "Step 4: Seeding initial tasks..."
-python -m scraper.main --seed-only
+uv run python -m scraper.main --seed-only
 
 echo ""
 echo "Step 5: Starting workers..."
@@ -51,7 +51,7 @@ echo "Starting with default worker counts (can override with CLI args)"
 echo ""
 
 # Start the main scraper
-python -m scraper.main
+uv run python -m scraper.main
 
 echo ""
 echo "===== Scraper Stopped ====="
