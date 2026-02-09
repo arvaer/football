@@ -29,7 +29,7 @@ status:
 	./scripts/check_status.sh
 
 rabbitmq:
-	./scripts/start_rabbitmq.sh
+	./scripts/start_rabbitmq.sh --docker
 
 vllm:
 	./scripts/start_vllm.sh

@@ -33,6 +33,11 @@ from scraper.workers.league_tier_enricher import (
     write_enriched_jsonl,
     generate_stage_b_report,
 )
+from scraper.workers.league_tier_clubs_extractor import (
+    enrich_competitions_batch,
+    write_clubs_enriched_jsonl,
+    generate_stage_c_report,
+)
 
 structlog.configure(
     processors=[
@@ -227,6 +232,63 @@ async def run_stage_b(stage_a_rows: list) -> Optional[Path]:
         return None
 
 
+async def run_stage_c(stage_ab_rows: list, max_concurrent: int = 3) -> Optional[Path]:
+    """Run Stage C: Club statistics extraction.
+    
+    Args:
+        stage_ab_rows: Rows from Stage A or B
+        max_concurrent: Maximum concurrent requests to Transfermarkt
+        
+    Returns:
+        Path to Stage C output or None if failed
+    """
+    logger.info("=== STAGE C: Club Statistics Extraction ===")
+    
+    try:
+        # Enrich competitions with club stats
+        enriched_rows = await enrich_competitions_batch(
+            stage_ab_rows,
+            max_concurrent=max_concurrent,
+            delay_between=1.0
+        )
+        
+        # Write Stage C output
+        date_str = datetime.utcnow().strftime('%Y-%m-%d')
+        output_dir = Path('data/extracted')
+        output_path = output_dir / f'league_clubs_enriched_{date_str}.jsonl'
+        
+        write_clubs_enriched_jsonl(output_path, enriched_rows)
+        
+        # Generate and display report
+        report = generate_stage_c_report(enriched_rows)
+        logger.info("stage_c_complete", **report)
+        
+        print("\n" + "="*60)
+        print("STAGE C REPORT")
+        print("="*60)
+        print(f"Total competitions processed: {report['total_competitions']}")
+        print(f"Successful extractions: {report['successful_extractions']}")
+        print(f"Failed extractions: {report['failed_extractions']}")
+        print(f"Success rate: {report['success_rate']}%")
+        print(f"\nTotal clubs extracted: {report['total_clubs_extracted']}")
+        print(f"Competitions with summary: {report['competitions_with_summary']}")
+        print(f"\nBy tier:")
+        for tier, stats in report['by_tier'].items():
+            print(f"  Tier {tier}: {stats['competitions']} competitions, "
+                  f"{stats['total_clubs']} clubs "
+                  f"(avg {stats['avg_clubs_per_competition']} per competition)")
+        print(f"\nOutput written to: {output_path}")
+        print("="*60 + "\n")
+        
+        return output_path
+        
+    except Exception as e:
+        logger.error("stage_c_failed",
+                    error=str(e),
+                    exc_info=True)
+        return None
+
+
 async def main():
     """Run the complete league tier extraction pipeline."""
     logger.info("starting_league_tier_extraction_pipeline")
@@ -239,6 +301,20 @@ async def main():
     # Run Stage B (enrichment) - non-blocking
     stage_b_path = await run_stage_b(stage_a_rows)
     
+    # Use Stage B output if available, otherwise use Stage A
+    rows_for_stage_c = stage_a_rows  # We'll use Stage A for now since B is stub
+    
+    # Run Stage C (club statistics) - optional but recommended
+    print("\nStage C will fetch each competition page to extract club statistics.")
+    print("This will make HTTP requests to Transfermarkt (respectfully, with delays).")
+    print(f"Estimated time: ~{len(stage_a_rows) * 1.5 / 60:.1f} minutes for {len(stage_a_rows)} competitions")
+    
+    # For testing, you might want to limit this
+    # Uncomment to process only first N competitions:
+    # rows_for_stage_c = stage_a_rows[:10]
+    
+    stage_c_path = await run_stage_c(rows_for_stage_c, max_concurrent=3)
+    
     # Final summary
     end_time = datetime.utcnow()
     duration = (end_time - start_time).total_seconds()
@@ -246,23 +322,27 @@ async def main():
     print("\n" + "="*60)
     print("PIPELINE COMPLETE")
     print("="*60)
-    print(f"Duration: {duration:.2f} seconds")
+    print(f"Duration: {duration:.2f} seconds ({duration/60:.1f} minutes)")
     print(f"Stage A output: {stage_a_path}")
     if stage_b_path:
         print(f"Stage B output: {stage_b_path}")
     else:
         print(f"Stage B: Failed (Stage A is still valid)")
+    if stage_c_path:
+        print(f"Stage C output: {stage_c_path}")
+    else:
+        print(f"Stage C: Failed or skipped")
     print(f"\nNext steps:")
-    print(f"  1. Review {stage_a_path}")
-    print(f"  2. Verify tier assignments are correct")
-    print(f"  3. Check URL normalization to .com")
-    print(f"  4. Implement actual LLM enrichment in Stage B")
+    print(f"  1. Review {stage_c_path if stage_c_path else stage_a_path}")
+    print(f"  2. Verify club statistics are accurate")
+    print(f"  3. Use this data for analysis or further processing")
     print("="*60 + "\n")
     
     logger.info("pipeline_complete", 
                duration_seconds=duration,
                stage_a_output=str(stage_a_path),
-               stage_b_output=str(stage_b_path) if stage_b_path else None)
+               stage_b_output=str(stage_b_path) if stage_b_path else None,
+               stage_c_output=str(stage_c_path) if stage_c_path else None)
 
 
 if __name__ == "__main__":

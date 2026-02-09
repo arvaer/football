@@ -119,6 +119,11 @@ class Club(BaseModel):
     country: Optional[str] = None
     league: Optional[str] = None
     division: Optional[int] = None
+    squad_size: Optional[int] = None  # Number of players in squad
+    average_age: Optional[float] = None  # Average age of squad
+    foreigners: Optional[int] = None  # Number of foreign players
+    average_market_value: Optional[float] = None  # Avg market value per player (millions EUR)
+    total_market_value: Optional[float] = None  # Total squad market value (millions EUR)
     scraped_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -195,6 +200,31 @@ class ValidationReport(BaseModel):
     validated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class CompetitionClubStats(BaseModel):
+    """Club statistics within a competition."""
+    
+    tm_id: Optional[str] = None
+    name: str
+    squad_size: Optional[int] = None
+    average_age: Optional[float] = None
+    foreigners: Optional[int] = None
+    average_market_value: Optional[float] = None  # millions
+    average_market_value_currency: Optional[str] = None
+    total_market_value: Optional[float] = None  # millions
+    total_market_value_currency: Optional[str] = None
+
+
+class CompetitionClubs(BaseModel):
+    """Competition clubs data with statistics."""
+    
+    competition_code: Optional[str] = None
+    competition_name: Optional[str] = None
+    url: str
+    clubs: List[CompetitionClubStats] = Field(default_factory=list)
+    summary: Optional[CompetitionClubStats] = None
+    scraped_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class RepairTask(BaseModel):
     """Task for selector repair agent."""
     
@@ -215,3 +245,4 @@ class SelectorSuggestion(BaseModel):
     xpath: Optional[str] = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reasoning: Optional[str] = None
+

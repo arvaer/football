@@ -584,3 +584,271 @@ def parse_club_profile(html: str, url: str) -> Dict[str, Any]:
     logger.info("bs_extraction_club_profile", club_id=club_id, fields=list(data["club"].keys()))
     
     return data
+
+
+def parse_competition_clubs(html: str, url: str) -> Dict[str, Any]:
+    """
+    Parse competition page club statistics table using BeautifulSoup.
+    
+    Extracts all clubs in a competition with their squad statistics including:
+    - Squad size
+    - Average age
+    - Number of foreigners
+    - Average market value per player
+    - Total market value
+    - Summary row totals
+    
+    Args:
+        html: HTML content
+        url: Page URL (e.g., /major-league-soccer/startseite/wettbewerb/MLS1)
+    
+    Returns:
+        Dict with competition info, list of club stats, and summary
+    
+    Raises:
+        ExtractionError: If required markers are missing or parsing fails
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    
+    # Verify page markers
+    if '/wettbewerb/' not in url:
+        raise ExtractionError(f"URL does not match competition pattern: {url}")
+    
+    # Extract competition code from URL
+    competition_code = None
+    match = re.search(r'/wettbewerb/([A-Z0-9]+)', url)
+    if match:
+        competition_code = match.group(1)
+    
+    # Extract competition name from header
+    competition_name = None
+    name_elem = soup.find('h1', class_='data-header__headline-wrapper')
+    if name_elem:
+        competition_name = clean_text(name_elem.get_text())
+    
+    data = {
+        "competition": {
+            "code": competition_code,
+            "name": competition_name,
+            "url": url,
+        },
+        "clubs": [],
+        "summary": {}
+    }
+    
+    # Find the responsive-table containing club statistics
+    # The table typically has columns: Club, Squad, ø age, Foreigners, ø market value, Total market value
+    responsive_tables = soup.find_all('div', class_='responsive-table')
+    
+    clubs_table = None
+    for table_div in responsive_tables:
+        table = table_div.find('table', class_='items')
+        if not table:
+            continue
+        
+        # Check if this is the clubs table by looking at headers
+        thead = table.find('thead')
+        if thead:
+            headers = thead.find_all('th')
+            header_texts = [clean_text(th.get_text()).lower() for th in headers]
+            
+            # Look for characteristic columns like "squad", "market value", etc.
+            if any('squad' in h for h in header_texts) or any('market value' in h for h in header_texts):
+                clubs_table = table
+                break
+    
+    if not clubs_table:
+        logger.warning("bs_extraction_no_clubs_table", url=url)
+        return data
+    
+    # Parse table headers to understand column positions
+    thead = clubs_table.find('thead')
+    if not thead:
+        raise ExtractionError("No thead found in clubs table")
+    
+    headers = thead.find_all('th')
+    header_map = {}
+    col_offset = 0  # Track offset for colspan columns
+    
+    for idx, th in enumerate(headers):
+        header_text = clean_text(th.get_text()).lower()
+        colspan = int(th.get('colspan', 1))
+        
+        # Check if this header is hidden (won't appear as a cell in tbody)
+        th_classes = th.get('class', [])
+        is_hidden = 'hide' in th_classes
+        
+        if 'club' in header_text:
+            # Club column typically spans 2 cells (logo + name)
+            header_map['club_img'] = col_offset
+            header_map['club_name'] = col_offset + 1 if colspan > 1 else col_offset
+        elif not is_hidden:
+            # Only map non-hidden columns to cell positions
+            if 'squad' in header_text:
+                header_map['squad'] = col_offset
+            elif 'age' in header_text or 'ø age' in header_text:
+                header_map['avg_age'] = col_offset
+            elif 'foreigner' in header_text:
+                header_map['foreigners'] = col_offset
+            elif 'ø market value' in header_text or header_text == 'ø market value':
+                header_map['avg_market_value'] = col_offset
+            elif 'total market value' in header_text:
+                header_map['total_market_value'] = col_offset
+        
+        # Only increment col_offset if not hidden
+        if not is_hidden:
+            col_offset += colspan
+    
+    logger.debug("clubs_table_headers", header_map=header_map)
+    
+    # Parse tbody rows
+    tbody = clubs_table.find('tbody')
+    if not tbody:
+        raise ExtractionError("No tbody found in clubs table")
+    
+    rows = tbody.find_all('tr', recursive=False)
+    
+    for row in rows:
+        # Check if this is a summary row (typically has class or different structure)
+        row_classes = row.get('class', [])
+        is_summary = 'footer' in ' '.join(row_classes) or 'summe' in ' '.join(row_classes)
+        
+        cells = row.find_all('td')
+        if len(cells) < 2:
+            continue
+        
+        # Extract club information
+        club_data = {}
+        
+        # Extract club name from the club_name cell
+        if 'club_name' in header_map:
+            idx = header_map['club_name']
+            if idx < len(cells):
+                cell = cells[idx]
+                # Look for club link in this cell
+                club_link = cell.find('a', href=re.compile(r'/verein/'))
+                if club_link:
+                    club_data['name'] = clean_text(club_link.get_text())
+                    club_id = extract_id_from_url(club_link.get('href', ''), 'club')
+                    if club_id:
+                        club_data['tm_id'] = club_id
+                else:
+                    # For summary rows or cells without links
+                    club_data['name'] = clean_text(cell.get_text())
+        
+        # Extract other stats
+        for col_name, idx in header_map.items():
+            if col_name in ['club_img', 'club_name']:
+                continue  # Already handled
+            
+            if idx >= len(cells):
+                continue
+            
+            cell = cells[idx]
+            cell_text = clean_text(cell.get_text())
+            
+            if col_name == 'squad':
+                # Parse squad size as integer
+                if cell_text:
+                    try:
+                        club_data['squad_size'] = int(cell_text.replace(',', ''))
+                    except ValueError:
+                        club_data['squad_size'] = None
+            
+            elif col_name == 'avg_age':
+                # Parse average age as float
+                if cell_text:
+                    try:
+                        # Format is usually like "25.7" or "25.4 Years"
+                        age_str = cell_text.replace('Years', '').replace(',', '.').strip()
+                        club_data['average_age'] = float(age_str)
+                    except ValueError:
+                        club_data['average_age'] = None
+            
+            elif col_name == 'foreigners':
+                # Parse foreigners count as integer
+                if cell_text:
+                    try:
+                        club_data['foreigners'] = int(cell_text.replace(',', ''))
+                    except ValueError:
+                        club_data['foreigners'] = None
+            
+            elif col_name == 'avg_market_value':
+                # Parse market value (e.g., "€112k", "€1.2m")
+                amount, currency, _ = parse_money(cell_text)
+                if amount is not None:
+                    club_data['average_market_value'] = amount
+                    club_data['average_market_value_currency'] = currency
+            
+            elif col_name == 'total_market_value':
+                # Parse total market value (e.g., "€3.48m", "€100.5m")
+                amount, currency, _ = parse_money(cell_text)
+                if amount is not None:
+                    club_data['total_market_value'] = amount
+                    club_data['total_market_value_currency'] = currency
+        
+        # Add to appropriate list
+        if is_summary:
+            data['summary'] = club_data
+            logger.debug("extracted_summary", summary=club_data)
+        else:
+            if club_data:  # Only add if we extracted something
+                data['clubs'].append(club_data)
+    
+    # Also check tfoot for summary row
+    tfoot = clubs_table.find('tfoot')
+    if tfoot and not data['summary']:
+        footer_row = tfoot.find('tr')
+        if footer_row:
+            cells = footer_row.find_all('td')
+            if len(cells) >= 2:
+                summary_data = {}
+                
+                # Extract stats from footer (usually aligned with body columns)
+                for col_name, idx in header_map.items():
+                    if col_name in ['club_img', 'club_name']:
+                        continue
+                    
+                    if idx >= len(cells):
+                        continue
+                    
+                    cell = cells[idx]
+                    cell_text = clean_text(cell.get_text())
+                    
+                    if col_name == 'squad':
+                        try:
+                            summary_data['squad_size'] = int(cell_text.replace(',', ''))
+                        except ValueError:
+                            pass
+                    elif col_name == 'avg_age':
+                        try:
+                            age_str = cell_text.replace('Years', '').replace(',', '.').strip()
+                            summary_data['average_age'] = float(age_str)
+                        except ValueError:
+                            pass
+                    elif col_name == 'foreigners':
+                        try:
+                            summary_data['foreigners'] = int(cell_text.replace(',', ''))
+                        except ValueError:
+                            pass
+                    elif col_name == 'avg_market_value':
+                        amount, currency, _ = parse_money(cell_text)
+                        if amount is not None:
+                            summary_data['average_market_value'] = amount
+                            summary_data['average_market_value_currency'] = currency
+                    elif col_name == 'total_market_value':
+                        amount, currency, _ = parse_money(cell_text)
+                        if amount is not None:
+                            summary_data['total_market_value'] = amount
+                            summary_data['total_market_value_currency'] = currency
+                
+                if summary_data:
+                    data['summary'] = summary_data
+                    logger.debug("extracted_footer_summary", summary=summary_data)
+    
+    logger.info("bs_extraction_competition_clubs",
+               competition_code=competition_code,
+               clubs_count=len(data['clubs']),
+               has_summary=bool(data['summary']))
+    
+    return data

@@ -28,3 +28,5 @@ scipy>=1.11
 # Utilities
 structlog>=24.1.0
 tenacity>=8.2.0
+requests>=2.31.0
+tqdm>=4.66.0
