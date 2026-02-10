@@ -1,14 +1,27 @@
-# Agentic Transfermarkt Scraper
+# Football Transfer Analytics Platform
 
-LLM-powered web scraper using vLLM and RabbitMQ for autonomous football transfer data collection from Transfermarkt.
+End-to-end pipeline for analyzing football player transfers and market valuations, featuring LLM-powered data scraping, network analysis, and predictive modeling.
+
+**🌐 Live Dashboard:** [mikeyfbstuff.streamlit.app](https://mikeyfbstuff.streamlit.app)
 
 ## 🚀 Features
 
-- **Smart vLLM Throttling**: Protects your local GPU with rate limiting, backoff, and circuit breaker
-- **LLM-Based Extraction**: Structured data extraction with context-aware prompts
+### 📊 Interactive Dashboard
+- **Transfer Network Visualization**: Explore club-to-club transfer relationships with interactive network graphs
+- **Player Valuation Projections**: Run Monte Carlo simulations to forecast future market values
+- **Batch Analytics**: Compare risk/return profiles across age bands and positions
+- **Deployed at**: [mikeyfbstuff.streamlit.app](https://mikeyfbstuff.streamlit.app)
+
+### 🤖 Data Collection
+- **Smart vLLM Throttling**: GPU-protected LLM inference with rate limiting and circuit breaker
+- **LLM-Based Extraction**: Structured data extraction from Transfermarkt with context-aware prompts
 - **Distributed Queue**: RabbitMQ with priority support for efficient task management
 - **Self-Healing**: Automatic selector repair on extraction failures
-- **Graceful Degradation**: Circuit breaker prevents cascading failures
+
+### 📈 Valuation Modeling
+- **Regime-Switching Model**: Separate dynamics for staying vs. moving clubs
+- **Stratified Analysis**: Age bands (U21, 21-24, 25-28, 29+) × Position groups (GK, DEF, MID, FWD)
+- **Monte Carlo Simulation**: Probabilistic forecasting with customizable scenarios
 
 ## Architecture
 
@@ -27,7 +40,19 @@ LLM-powered web scraper using vLLM and RabbitMQ for autonomous football transfer
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Dashboard (No Setup Required!)
+
+Visit the live dashboard: **[mikeyfbstuff.streamlit.app](https://mikeyfbstuff.streamlit.app)**
+
+Explore:
+- Transfer network visualizations
+- Individual player profiles with transfer history
+- Market valuation projections using historical data
+- Batch analytics across all player strata
+
+### Local Development
+
+#### 1. Install Dependencies
 
 ```bash
 # Activate venv
@@ -37,7 +62,7 @@ source venv/bin/activate.fish  # or source venv/bin/activate for bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+#### 2. Configure Environment
 
 ```bash
 # Copy example env file
@@ -53,7 +78,7 @@ cp .env.example .env
 # See VLLM_THROTTLING.md for tuning guide
 ```
 
-### 3. Start Infrastructure
+#### 3. Start Infrastructure
 
 **Option A: Manual (recommended for first run)**
 
@@ -76,13 +101,26 @@ python -m scraper.main
 
 ## Usage
 
-### Seed Initial Tasks
+### Dashboard
+
+**Local:**
+```bash
+streamlit run dashboard.py
+```
+
+Then open http://localhost:8501
+
+**Production:** Visit [mikeyfbstuff.streamlit.app](https://mikeyfbstuff.streamlit.app)
+
+### Data Scraping
+
+#### Seed Initial Tasks
 
 ```bash
 python -m scraper.main --seed-only
 ```
 
-### Run with Custom Worker Counts
+#### Run with Custom Worker Counts
 
 ```bash
 python -m scraper.main \
@@ -91,7 +129,7 @@ python -m scraper.main \
     --repair-workers 2
 ```
 
-### Monitor vLLM Throttling (NEW!)
+#### Monitor vLLM Throttling (NEW!)
 
 Watch the rate limiting and circuit breaker in action:
 
@@ -107,15 +145,15 @@ You'll see:
 - 🔴 Circuit breaker opens/closes
 - 📊 Live stats every 10 requests
 
-### Monitor Queues
+#### Monitor Queues
 
 RabbitMQ Management UI: http://localhost:15672 (guest/guest)
 
-### Check Logs
+#### Check Logs
 
 Logs are written to `logs/` directory in JSON format.
 
-### View Extracted Data
+#### View Extracted Data
 
 ```bash
 # View extracted transfers
@@ -129,6 +167,7 @@ cat data/extracted/player_transfers_*.jsonl | wc -l
 
 ```
 fb/
+├── dashboard.py            # 🎯 Streamlit analytics dashboard
 ├── scraper/
 │   ├── config.py           # Pydantic Settings configuration
 │   ├── models.py           # Data models (Player, Transfer, Club, etc.)
@@ -139,11 +178,23 @@ fb/
 │       ├── discovery_worker.py    # Page discovery and crawling
 │       ├── extraction_worker.py   # LLM-based data extraction
 │       └── repair_worker.py       # Selector repair agent
+├── graph_builder/          # Transfer network construction
+│   ├── graph.py            # NetworkX graph builder
+│   ├── ingest.py           # Data loading from JSONL
+│   └── transition_stats_loader.py  # Stratum statistics
+├── player_valuations/      # Valuation modeling engine
+│   └── valuation_pathways/
+│       ├── model/          # Regime-switching models
+│       ├── engine/         # Monte Carlo simulator
+│       └── report/         # Results generation
 ├── scripts/
 │   ├── start_vllm.sh       # Start vLLM server
 │   ├── start_rabbitmq.sh   # Start RabbitMQ (Podman)
-│   └── start_all.sh        # Start full stack
-├── data/extracted/         # Output JSONL files
+│   ├── compute_stratum_stats.py  # Generate transition statistics
+│   └── run_batch_valuations.py   # Batch valuation processing
+├── data/
+│   ├── extracted/          # Scraped JSONL files
+│   └── summary/            # Processed analytics results
 ├── logs/                   # Structured JSON logs
 ├── requirements.txt
 └── .env                    # Configuration (copy from .env.example)
