@@ -17,12 +17,14 @@ class SimulationResult(BaseModel):
     Attributes:
         final_values: DataFrame with columns [scenario, path_id, V_T]
         summary: Nested dict {scenario_name: {metric: value}}
+        stratum_info: Optional metadata about the stratum used for the simulation
     """
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
     final_values: pd.DataFrame
     summary: dict[str, dict[str, float]]
+    stratum_info: dict | None = None
 
 
 def run_simulation(

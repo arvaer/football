@@ -12,6 +12,7 @@ dependencies = [
     "networkx>=3.6.1",
     "openai>=2.17.0",
     "pandas>=2.3.3",
+    "player-valuations",
     "plotly>=6.5.2",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
@@ -22,3 +23,11 @@ dependencies = [
     "tenacity>=9.1.4",
     "vllm>=0.15.1; sys_platform != 'darwin'",
 ]
+
+[tool.uv.workspace]
+members = [
+    "player_valuations",
+]
+
+[tool.uv.sources]
+player-valuations = { workspace = true }

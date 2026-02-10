@@ -100,13 +100,6 @@ def compute_stratum_stats(transitions: List[Dict], use_granular_position: bool =
         else:
             mapping_ok_count = None
             mapping_ok_pct = None
-    for (age_band, position, move_label), trans_list in strata.items():
-        n = len(trans_list)
-        
-        # Extract metrics
-        log_returns = [t['log_return'] for t in trans_list]
-        rates_per_day = [t['rate_per_day'] for t in trans_list]
-        dt_days_list = [t['dt_days'] for t in trans_list]
         
         # Compute statistics
         stats = {

@@ -25,6 +25,9 @@ class StratumStats:
     mu_rate_per_day: float
     sigma_rate_per_day: float
     median_rate_per_day: float
+    mu_rate_per_30day: float
+    sigma_rate_per_30day: float
+    median_rate_per_30day: float
     dt_days_median: int
     dt_days_mean: float
     
@@ -43,6 +46,9 @@ class StratumStats:
             mu_rate_per_day=data['mu_rate_per_day'],
             sigma_rate_per_day=data['sigma_rate_per_day'],
             median_rate_per_day=data['median_rate_per_day'],
+            mu_rate_per_30day=data.get('mu_rate_per_30day', data['mu_rate_per_day'] * 30),
+            sigma_rate_per_30day=data.get('sigma_rate_per_30day', data['sigma_rate_per_day'] * 30),
+            median_rate_per_30day=data.get('median_rate_per_30day', data['median_rate_per_day'] * 30),
             dt_days_median=data['dt_days_median'],
             dt_days_mean=data['dt_days_mean'],
         )
@@ -149,7 +155,7 @@ class TransitionStatsLoader:
         Get statistics for a specific stratum.
         
         Args:
-            age: Player age (will be converted to 2-year band)
+            age: Player age (will be converted to age band)
             position: Player position
             move_label: Move classification label
         
@@ -158,10 +164,15 @@ class TransitionStatsLoader:
         """
         self._load_stratum_stats()
         
-        # Convert age to band
-        band_start = (int(age) // 2) * 2
-        band_end = band_start + 2
-        age_band = f"{band_start}-{band_end}"
+        # Convert age to band (U21, 21-24, 25-28, 29+)
+        if age < 21:
+            age_band = 'U21'
+        elif age < 25:
+            age_band = '21-24'
+        elif age < 29:
+            age_band = '25-28'
+        else:
+            age_band = '29+'
         
         stratum_key = f"{age_band}_{position}_{move_label}"
         return self._stratum_stats.get(stratum_key)

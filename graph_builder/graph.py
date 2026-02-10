@@ -51,6 +51,9 @@ class TransferGraph:
         self._add_player_nodes(players)
         self._add_club_nodes(transfers)
         
+        # Enrich player nodes with data from transitions
+        self._enrich_player_nodes_from_transitions()
+        
         # Add edges
         self._add_transfer_edges(transfers)
         
@@ -96,6 +99,87 @@ class TransferGraph:
                     node_type="club",
                     name=club
                 )
+    
+    def _enrich_player_nodes_from_transitions(self):
+        """Enrich player nodes with position and age data from transitions."""
+        from pathlib import Path
+        import json
+        from datetime import datetime
+        
+        # Load transitions data
+        data_dir = Path("data/extracted")
+        transition_files = list(data_dir.glob("mv_transitions_*.jsonl"))
+        
+        if not transition_files:
+            print("Warning: No transition files found for enrichment")
+            return
+        
+        # Use most recent transitions file
+        latest_file = max(transition_files, key=lambda p: p.stat().st_mtime)
+        
+        # Build player metadata from transitions
+        # Store the most recent/reliable data for each player
+        player_metadata = {}
+        with open(latest_file, 'r') as f:
+            for line in f:
+                trans = json.loads(line)
+                player_id = trans.get('player_id')
+                if not player_id:
+                    continue
+                
+                position = trans.get('position')
+                age = trans.get('age_at_d0')
+                
+                # Estimate date_of_birth from age if available
+                date_of_birth = None
+                if age:
+                    # Use d0 date from transition
+                    d0_str = trans.get('d0')
+                    if d0_str:
+                        try:
+                            d0_date = datetime.fromisoformat(d0_str)
+                            # Calculate approximate birth year
+                            birth_year = d0_date.year - int(age)
+                            date_of_birth = f"{birth_year}-01-01"  # Approximate
+                        except (ValueError, TypeError):
+                            pass
+                
+                # Update metadata if we don't have this player yet, or if current data is more complete
+                if player_id not in player_metadata:
+                    player_metadata[player_id] = {
+                        'position': position,
+                        'date_of_birth': date_of_birth,
+                        'age': age
+                    }
+                else:
+                    # Update if new data is more complete
+                    if not player_metadata[player_id]['position'] and position:
+                        player_metadata[player_id]['position'] = position
+                    if not player_metadata[player_id]['date_of_birth'] and date_of_birth:
+                        player_metadata[player_id]['date_of_birth'] = date_of_birth
+                    if not player_metadata[player_id]['age'] and age:
+                        player_metadata[player_id]['age'] = age
+        
+        # Enrich player nodes
+        enriched_count = 0
+        for player_node in list(self.graph.nodes()):
+            if not player_node.startswith("player:"):
+                continue
+            
+            player_id = player_node.replace("player:", "")
+            if player_id in player_metadata:
+                metadata = player_metadata[player_id]
+                
+                # Update node attributes if they're missing
+                node_data = self.graph.nodes[player_node]
+                if not node_data.get('position') and metadata['position']:
+                    node_data['position'] = metadata['position']
+                if not node_data.get('date_of_birth') and metadata['date_of_birth']:
+                    node_data['date_of_birth'] = metadata['date_of_birth']
+                
+                enriched_count += 1
+        
+        print(f"Enriched {enriched_count} player nodes with transition data")
     
     def _add_transfer_edges(self, transfers: List[Transfer]):
         """

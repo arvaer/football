@@ -338,47 +338,86 @@ class JSONLDataSource(DataSource):
                         if not record.get('success'):
                             continue
                         
-                        # Each record has a 'data' field with player info
-                        data = record.get('data', {})
-                        tm_id = data.get('tm_id')
-                        
-                        # Skip if no ID
-                        if not tm_id:
-                            skipped_count['no_id'] += 1
-                            continue
-                        
-                        # Skip duplicates
-                        if tm_id in seen_ids:
-                            skipped_count['duplicate'] += 1
-                            continue
-                        
-                        # Clean player name
-                        name = clean_player_name(data.get('name'))
-                        if not name:
-                            skipped_count['no_name'] += 1
-                            continue
-                        
-                        # Clean and validate other fields
-                        current_club = clean_club_name(data.get('current_club'))
-                        nationality = clean_nationality(data.get('nationality'))
-                        position = normalize_position(data.get('position'))
-                        date_of_birth = validate_date(data.get('date_of_birth'))
-                        height_cm = validate_height(data.get('height_cm'))
-                        
-                        # Get scraped_at timestamp
-                        scraped_at = data.get('scraped_at', record.get('extracted_at', ''))
-                        
-                        players.append(Player(
-                            tm_id=tm_id,
-                            name=name,
-                            date_of_birth=date_of_birth,
-                            nationality=nationality,
-                            position=position,
-                            current_club=current_club,
-                            scraped_at=scraped_at
-                        ))
-                        
-                        seen_ids.add(tm_id)
+                        # Handle both enriched (with 'players' list) and non-enriched formats
+                        # Enriched format has a 'players' list we can use directly
+                        if 'players' in record and record['players']:
+                            # Use the players list from enriched format
+                            for player_data in record['players']:
+                                tm_id = player_data.get('tm_id')
+                                
+                                if not tm_id or tm_id in seen_ids:
+                                    if not tm_id:
+                                        skipped_count['no_id'] += 1
+                                    else:
+                                        skipped_count['duplicate'] += 1
+                                    continue
+                                
+                                name = clean_player_name(player_data.get('name'))
+                                if not name:
+                                    skipped_count['no_name'] += 1
+                                    continue
+                                
+                                current_club = clean_club_name(player_data.get('current_club'))
+                                nationality = clean_nationality(player_data.get('nationality'))
+                                position = normalize_position(player_data.get('position'))
+                                date_of_birth = validate_date(player_data.get('date_of_birth'))
+                                height_cm = validate_height(player_data.get('height_cm'))
+                                scraped_at = player_data.get('scraped_at', record.get('extracted_at', ''))
+                                
+                                players.append(Player(
+                                    tm_id=tm_id,
+                                    name=name,
+                                    date_of_birth=date_of_birth,
+                                    nationality=nationality,
+                                    position=position,
+                                    current_club=current_club,
+                                    scraped_at=scraped_at
+                                ))
+                                seen_ids.add(tm_id)
+                        else:
+                            # Non-enriched format: data.player contains the player info
+                            data = record.get('data', {})
+                            player_data = data.get('player', data)  # Fallback to data if player key doesn't exist
+                            
+                            tm_id = player_data.get('tm_id')
+                            
+                            # Skip if no ID
+                            if not tm_id:
+                                skipped_count['no_id'] += 1
+                                continue
+                            
+                            # Skip duplicates
+                            if tm_id in seen_ids:
+                                skipped_count['duplicate'] += 1
+                                continue
+                            
+                            # Clean player name
+                            name = clean_player_name(player_data.get('name'))
+                            if not name:
+                                skipped_count['no_name'] += 1
+                                continue
+                            
+                            # Clean and validate other fields
+                            current_club = clean_club_name(player_data.get('current_club'))
+                            nationality = clean_nationality(player_data.get('nationality'))
+                            position = normalize_position(player_data.get('position'))
+                            date_of_birth = validate_date(player_data.get('date_of_birth'))
+                            height_cm = validate_height(player_data.get('height_cm'))
+                            
+                            # Get scraped_at timestamp
+                            scraped_at = player_data.get('scraped_at', record.get('extracted_at', ''))
+                            
+                            players.append(Player(
+                                tm_id=tm_id,
+                                name=name,
+                                date_of_birth=date_of_birth,
+                                nationality=nationality,
+                                position=position,
+                                current_club=current_club,
+                                scraped_at=scraped_at
+                            ))
+                            
+                            seen_ids.add(tm_id)
                         
                     except (json.JSONDecodeError, KeyError, AttributeError) as e:
                         skipped_count['invalid_data'] += 1
