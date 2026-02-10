@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-02-10",
+  "parameters": {
+    "V0": 2.0,
+    "months": 6,
+    "n_paths": 1000,
+    "seed": 42,
+    "min_sample_size": 10
+  },
+  "stats": {
+    "num_strata": 16,
+    "num_scenarios": 48
+  }
+}
