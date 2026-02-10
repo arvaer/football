@@ -528,12 +528,15 @@ def main():
     elif view_mode == "Player Search":
         st.header("Player Transfer History")
         
-        # Get all players
+        # Get all players with position and date_of_birth (required for valuation)
         player_nodes = [n for n in graph.nodes() if n.startswith("player:")]
         player_names = {
             graph.nodes[n].get('name', n): n.replace("player:", "")
             for n in player_nodes
+            if graph.nodes[n].get('position') and graph.nodes[n].get('date_of_birth')
         }
+        
+        st.info(f"Showing {len(player_names)} players with complete data (position & date of birth) for valuation projection")
         
         selected_player_name = st.selectbox(
             "Select a player",
